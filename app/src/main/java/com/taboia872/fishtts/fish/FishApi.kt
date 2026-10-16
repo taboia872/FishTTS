@@ -166,7 +166,15 @@ object FishApi {
             val status = conn.responseCode
             if (status != 200) {
                 val err = conn.errorStream?.bufferedReader()?.readText()?.take(300) ?: ""
-                throw RuntimeException("FishAudio HTTP $status: $err")
+                val msg = JSONObject().let { jo ->
+                    try {
+                        jo.put("tmp", JSONObject(err).optString("message", ""))
+                        jo.optString("tmp")
+                    } catch (e: Exception) { "" }
+                }
+                throw RuntimeException(
+                    "HTTP $status" + if (msg.isNotBlank()) ": $msg" else ": $err"
+                )
             }
 
             val buf = ByteArrayOutputStream(1 shl 20)

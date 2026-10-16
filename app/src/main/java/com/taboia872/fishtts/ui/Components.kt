@@ -267,50 +267,69 @@ fun VoiceSearchCard() {
     var lastMode by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    // One loader for both modes. mode="popular" ignores `query`.
+    // Server-side language for PT/EN; "Outros" accumulates greedily.
+    fun serverLang(): String = when (langFilter) {
+        LangFilter.PT -> "pt"
+        LangFilter.EN -> "en"
+        else -> ""
+    }
+
+    fun isOtherLang(v: FishApi.FishVoice): Boolean =
+        v.languages.none { it.equals("pt", true) || it.startsWith("pt-", true) } &&
+        v.languages.none { it.equals("en", true) || it.startsWith("en-", true) }
+
     fun load(nextPage: Int, mode: String) {
         scope.launch {
             loading = true
             error = null
-            val res = withContext(Dispatchers.IO) {
+            val fresh = nextPage <= 1 || mode != lastMode
+            val lang = serverLang()
+            val first = withContext(Dispatchers.IO) {
                 if (mode == "popular") {
                     FishApi.listVoices(
-                        cfg.apiKey, pageNumber = nextPage, sortBy = "score"
+                        cfg.apiKey, pageNumber = nextPage, sortBy = "score",
+                        language = lang
                     )
                 } else {
                     FishApi.listVoices(
-                        cfg.apiKey, search = query, pageNumber = nextPage
+                        cfg.apiKey, search = query, pageNumber = nextPage,
+                        language = lang
                     )
                 }
             }
-            res.onSuccess {
-                results = if (nextPage <= 1 || mode != lastMode) it.voices
-                         else results + it.voices
-                hasMore = it.hasMore
+            first.onSuccess { pageData ->
+                var voices = pageData.voices
+                var more = pageData.hasMore
+                if (langFilter == LangFilter.OTHER) {
+                    // Fill the batch with non-pt/en voices: keep pulling
+                    // pages until 50 are collected or catalog ends.
+                    var guard = 0
+                    while (voices.size < 50 && more && guard < 6) {
+                        guard++
+                        val extra = withContext(Dispatchers.IO) {
+                            FishApi.listVoices(
+                                cfg.apiKey, search = query,
+                                pageNumber = nextPage + guard, language = ""
+                            )
+                        }
+                        extra.onSuccess { nd ->
+                            voices = voices + nd.voices.filter { isOtherLang(it) }
+                            more = nd.hasMore
+                        }.onFailure { more = false }
+                    }
+                }
+                results = if (fresh) voices else results + voices
+                hasMore = more
                 page = nextPage
                 lastMode = mode
             }.onFailure {
                 error = it.message
-                if (nextPage <= 1 || mode != lastMode) {
+                if (fresh) {
                     results = emptyList()
                     hasMore = false
                 }
             }
             loading = false
-        }
-    }
-
-    val visible = when (langFilter) {
-        LangFilter.ALL -> results
-        LangFilter.PT -> results.filter { v ->
-            v.languages.any { it.equals("pt", true) || it.startsWith("pt-", true) }
-        }
-        LangFilter.EN -> results.filter { v ->
-            v.languages.any { it.equals("en", true) || it.startsWith("en-", true) }
-        }
-        LangFilter.OTHER -> results.filter { v ->
-            v.languages.none { it.equals("pt", true) || it.startsWith("pt-", true) } &&
-            v.languages.none { it.equals("en", true) || it.startsWith("en-", true) }
         }
     }
 
@@ -329,11 +348,34 @@ fun VoiceSearchCard() {
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Ex.: goku, narrador, brasileira…") },
+                placeholder = { Text("Ex.: goku, naruto, narrador…") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 singleLine = true,
                 shape = MaterialTheme.shapes.large
             )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = langFilter == LangFilter.ALL,
+                    onClick = { langFilter = LangFilter.ALL },
+                    label = { Text("Todas") }
+                )
+                FilterChip(
+                    selected = langFilter == LangFilter.PT,
+                    onClick = { langFilter = LangFilter.PT },
+                    label = { Text("Português") }
+                )
+                FilterChip(
+                    selected = langFilter == LangFilter.EN,
+                    onClick = { langFilter = LangFilter.EN },
+                    label = { Text("Inglês") }
+                )
+                FilterChip(
+                    selected = langFilter == LangFilter.OTHER,
+                    onClick = { langFilter = LangFilter.OTHER },
+                    label = { Text("Outros") }
+                )
+            }
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
@@ -362,31 +404,6 @@ fun VoiceSearchCard() {
                     }
                 }
             }
-            if (results.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = langFilter == LangFilter.ALL,
-                        onClick = { langFilter = LangFilter.ALL },
-                        label = { Text("Todas") }
-                    )
-                    FilterChip(
-                        selected = langFilter == LangFilter.PT,
-                        onClick = { langFilter = LangFilter.PT },
-                        label = { Text("Português") }
-                    )
-                    FilterChip(
-                        selected = langFilter == LangFilter.EN,
-                        onClick = { langFilter = LangFilter.EN },
-                        label = { Text("Inglês") }
-                    )
-                    FilterChip(
-                        selected = langFilter == LangFilter.OTHER,
-                        onClick = { langFilter = LangFilter.OTHER },
-                        label = { Text("Outros") }
-                    )
-                }
-            }
             if (loading) {
                 Spacer(Modifier.height(12.dp))
                 CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
@@ -399,9 +416,9 @@ fun VoiceSearchCard() {
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            if (visible.isNotEmpty()) {
+            if (results.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
-                visible.forEach { voice ->
+                results.forEach { voice ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
