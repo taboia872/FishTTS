@@ -107,61 +107,59 @@ class FishTtsService : TextToSpeechService() {
     override fun onSynthesizeText(request: SynthesisRequest?, callback: SynthesisCallback?) {
         if (request == null || callback == null) return
         stopped = false
-        try {
-            val cfg = AppSettings.config.value
-            if (cfg.apiKey.isBlank()) {
-                Log.e(TAG, "No API key configured")
-                callback.error()
-                return
-            }
-
-            // Requested voice: "fish-<voiceId>" (a favorite) or the default,
-            // which resolves to the voice selected in the app.
-            var voiceId = cfg.fishVoiceId
-            request.voiceName?.takeIf { it.isNotBlank() }?.let { name ->
-                voiceId = when {
-                    name.startsWith(VOICE_PREFIX) && name != VOICE_DEFAULT ->
-                        name.removePrefix(VOICE_PREFIX)
-                    else -> cfg.fishVoiceId
-                }
-            }
-
-            val text = (request.charSequenceText ?: request.text ?: "").toString()
-            if (text.isBlank()) {
-                callback.error()
-                return
-            }
-
-            val pcm = try {
-                FishApi.synthesizePcm(
-                    apiKey = cfg.apiKey,
-                    text = text,
-                    model = cfg.fishModel,
-                    voiceId = voiceId,
-                    sampleRate = SAMPLE_RATE,
-                    stopFlag = { stopped }
-                )
-            } catch (e: FishApi.StopRequested) {
-                Log.i(TAG, "Synthesis stopped by client")
-                return
-            } catch (e: Exception) {
-                Log.e(TAG, "Synthesis failed: " + e.message)
-                callback.error()
-                return
-            }
-
-            // Deliver PCM to the framework (playback / file sinks).
-            callback.start(SAMPLE_RATE, android.media.AudioFormat.ENCODING_PCM_16BIT, 1)
-            val chunk = 8192
-            var off = 0
-            while (off < pcm.size) {
-                if (stopped) return
-                val len = minOf(chunk, pcm.size - off)
-                callback.audioAvailable(pcm, off, len)
-                off += len
-            }
-            callback.done()
+        val cfg = AppSettings.config.value
+        if (cfg.apiKey.isBlank()) {
+            Log.e(TAG, "No API key configured")
+            callback.error()
+            return
         }
+
+        // Requested voice: "fish-<voiceId>" (a favorite) or the default,
+        // which resolves to the voice selected in the app.
+        var voiceId = cfg.fishVoiceId
+        request.voiceName?.takeIf { it.isNotBlank() }?.let { name ->
+            voiceId = when {
+                name.startsWith(VOICE_PREFIX) && name != VOICE_DEFAULT ->
+                    name.removePrefix(VOICE_PREFIX)
+                else -> cfg.fishVoiceId
+            }
+        }
+
+        val text = (request.charSequenceText ?: request.text ?: "").toString()
+        if (text.isBlank()) {
+            callback.error()
+            return
+        }
+
+        val pcm = try {
+            FishApi.synthesizePcm(
+                apiKey = cfg.apiKey,
+                text = text,
+                model = cfg.fishModel,
+                voiceId = voiceId,
+                sampleRate = SAMPLE_RATE,
+                stopFlag = { stopped }
+            )
+        } catch (e: FishApi.StopRequested) {
+            Log.i(TAG, "Synthesis stopped by client")
+            return
+        } catch (e: Exception) {
+            Log.e(TAG, "Synthesis failed: " + e.message)
+            callback.error()
+            return
+        }
+
+        // Deliver PCM to the framework (playback / file sinks).
+        callback.start(SAMPLE_RATE, android.media.AudioFormat.ENCODING_PCM_16BIT, 1)
+        val chunk = 8192
+        var off = 0
+        while (off < pcm.size) {
+            if (stopped) return
+            val len = minOf(chunk, pcm.size - off)
+            callback.audioAvailable(pcm, off, len)
+            off += len
+        }
+        callback.done()
     }
 
     override fun onStop() {

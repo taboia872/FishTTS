@@ -91,7 +91,7 @@ object FishApi {
                     val id = item.optString("_id", "")
                     if (id.isEmpty()) continue
                     val title = item.optString("title", "").ifEmpty { "Voice $id" }
-                    out.add(FishVoice(id, title, FishVoice.normalize(title)))
+                    out.add(FishVoice(id, title, normalize(title)))
                 }
                 VoicePage(out, root.optBoolean("has_more", false))
             } finally {
