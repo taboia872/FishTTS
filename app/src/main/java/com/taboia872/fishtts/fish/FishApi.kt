@@ -24,7 +24,9 @@ object FishApi {
     data class FishVoice(
         val id: String,
         val title: String,
-        val titleNormalized: String = ""
+        val titleNormalized: String = "",
+        /** ISO language codes, e.g. ["en"], ["pt"] (live-verified shape). */
+        val languages: List<String> = emptyList()
     ) {
         /** Case/diacritic-insensitive match key for client-side filtering. */
         fun matches(q: String): Boolean {
@@ -62,7 +64,9 @@ object FishApi {
         apiKey: String,
         search: String = "",
         pageNumber: Int = 1,
-        pageSize: Int = 50
+        pageSize: Int = 50,
+        language: String = "",
+        sortBy: String = ""
     ): Result<VoicePage> {
         val key = apiKey
         if (key.isBlank()) {
@@ -71,7 +75,9 @@ object FishApi {
         return runCatching {
             val searchQ = if (search.isNotBlank())
                 "&title=" + URLEncoder.encode(search, "UTF-8") else ""
-            val url = "$VOICES_URL?page_size=$pageSize&page_number=$pageNumber$searchQ"
+            val langQ = if (language.isNotBlank()) "&language=$language" else ""
+            val sortQ = if (sortBy.isNotBlank()) "&sort_by=$sortBy" else ""
+            val url = "$VOICES_URL?page_size=$pageSize&page_number=$pageNumber$searchQ$langQ$sortQ"
             val conn = Net.open(url).apply {
                 requestMethod = "GET"
                 connectTimeout = 15_000
@@ -91,7 +97,20 @@ object FishApi {
                     val id = item.optString("_id", "")
                     if (id.isEmpty()) continue
                     val title = item.optString("title", "").ifEmpty { "Voice $id" }
-                    out.add(FishVoice(id, title, normalize(title)))
+                    val langs = ArrayList<String>()
+                    val langArr = item.optJSONArray("languages")
+                    if (langArr != null) {
+                        for (j in 0 until langArr.length()) {
+                            langArr.optJSONObject(j)?.let { o ->
+                                val code = o.optString("language")
+                                if (code.isNotBlank()) langs.add(code)
+                            } ?: run {
+                                val s = langArr.optString(j)
+                                if (s.isNotBlank()) langs.add(s)
+                            }
+                        }
+                    }
+                    out.add(FishVoice(id, title, normalize(title), langs))
                 }
                 VoicePage(out, root.optBoolean("has_more", false))
             } finally {

@@ -2,6 +2,7 @@ package com.taboia872.fishtts.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -20,6 +22,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -128,30 +132,50 @@ fun TestCard(
 @Composable
 fun ModelPicker() {
     val cfg by config.collectAsState()
+    var expanded by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.extraLarge
     ) {
-        Column(Modifier.padding(20.dp)) {
-            Text(
-                "Modelo",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                if (cfg.fishModel == "s2.1-pro-free") "Grátis (tier de desenvolvimento)"
-                else "Pago (cobrança por uso)",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = true }
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Modelo",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    cfg.fishModel + if (cfg.fishModel == "s2.1-pro-free") " (grátis)" else "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Icon(Icons.Default.ArrowDropDown, null)
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
                 FishApi.MODELS.forEach { m ->
-                    FilterChip(
-                        selected = cfg.fishModel == m.id,
-                        onClick = { AppSettings.update { it.copy(fishModel = m.id) } },
-                        label = { Text(m.id) }
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                m.id + if (m.free) " — grátis" else ""
+                            )
+                        },
+                        onClick = {
+                            AppSettings.update { it.copy(fishModel = m.id) }
+                            expanded = false
+                        },
+                        trailingIcon = if (cfg.fishModel == m.id) {
+                            { Icon(Icons.Default.Check, null) }
+                        } else null
                     )
                 }
             }
@@ -228,6 +252,8 @@ fun FavoritesCard() {
 
 // --------------------------------------------------------- voice search
 
+private enum class LangFilter { ALL, PT, EN, OTHER }
+
 @Composable
 fun VoiceSearchCard() {
     val cfg by config.collectAsState()
@@ -235,9 +261,58 @@ fun VoiceSearchCard() {
     var results by remember { mutableStateOf<List<FishApi.FishVoice>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var hasMore by remember { mutableStateOf(false) }
-    var page by remember { mutableStateOf(1) }
+    var page by remember { mutableStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
+    var langFilter by remember { mutableStateOf(LangFilter.ALL) }
+    var lastMode by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+
+    // One loader for both modes. mode="popular" ignores `query`.
+    fun load(nextPage: Int, mode: String) {
+        scope.launch {
+            loading = true
+            error = null
+            val res = withContext(Dispatchers.IO) {
+                if (mode == "popular") {
+                    FishApi.listVoices(
+                        cfg.apiKey, pageNumber = nextPage, sortBy = "score"
+                    )
+                } else {
+                    FishApi.listVoices(
+                        cfg.apiKey, search = query, pageNumber = nextPage
+                    )
+                }
+            }
+            res.onSuccess {
+                results = if (nextPage <= 1 || mode != lastMode) it.voices
+                         else results + it.voices
+                hasMore = it.hasMore
+                page = nextPage
+                lastMode = mode
+            }.onFailure {
+                error = it.message
+                if (nextPage <= 1 || mode != lastMode) {
+                    results = emptyList()
+                    hasMore = false
+                }
+            }
+            loading = false
+        }
+    }
+
+    val visible = when (langFilter) {
+        LangFilter.ALL -> results
+        LangFilter.PT -> results.filter { v ->
+            v.languages.any { it.equals("pt", true) || it.startsWith("pt-", true) }
+        }
+        LangFilter.EN -> results.filter { v ->
+            v.languages.any { it.equals("en", true) || it.startsWith("en-", true) }
+        }
+        LangFilter.OTHER -> results.filter { v ->
+            v.languages.none { it.equals("pt", true) || it.startsWith("pt-", true) } &&
+            v.languages.none { it.equals("en", true) || it.startsWith("en-", true) }
+        }
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -262,50 +337,54 @@ fun VoiceSearchCard() {
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = {
-                        scope.launch {
-                            loading = true
-                            error = null
-                            page = 1
-                            val res = withContext(Dispatchers.IO) {
-                                FishApi.listVoices(cfg.apiKey, query, pageNumber = 1)
-                            }
-                            res.onSuccess {
-                                results = it.voices
-                                hasMore = it.hasMore
-                            }.onFailure {
-                                error = it.message
-                                results = emptyList()
-                                hasMore = false
-                            }
-                            loading = false
-                        }
-                    },
-                    enabled = !loading
+                    onClick = { load(1, "search") },
+                    enabled = !loading && query.isNotBlank()
                 ) {
                     Icon(Icons.Default.Search, null)
                     Spacer(Modifier.size(6.dp))
                     Text("Buscar")
                 }
-                if (hasMore) {
+                OutlinedButton(
+                    onClick = {
+                        val next = if (lastMode == "popular" && page > 0) page + 1 else 1
+                        load(next, "popular")
+                    },
+                    enabled = !loading && !(lastMode == "popular" && !hasMore && page > 0)
+                ) {
+                    Text(if (lastMode == "popular" && page > 0) "Mais populares" else "Populares")
+                }
+                if (lastMode == "search" && hasMore) {
                     OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                loading = true
-                                val next = page + 1
-                                val res = withContext(Dispatchers.IO) {
-                                    FishApi.listVoices(cfg.apiKey, query, pageNumber = next)
-                                }
-                                res.onSuccess {
-                                    results = results + it.voices
-                                    hasMore = it.hasMore
-                                    page = next
-                                }.onFailure { error = it.message }
-                                loading = false
-                            }
-                        },
+                        onClick = { load(page + 1, "search") },
                         enabled = !loading
-                    ) { Text("Mais") }
+                    ) {
+                        Text("Mais")
+                    }
+                }
+            }
+            if (results.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = langFilter == LangFilter.ALL,
+                        onClick = { langFilter = LangFilter.ALL },
+                        label = { Text("Todas") }
+                    )
+                    FilterChip(
+                        selected = langFilter == LangFilter.PT,
+                        onClick = { langFilter = LangFilter.PT },
+                        label = { Text("Português") }
+                    )
+                    FilterChip(
+                        selected = langFilter == LangFilter.EN,
+                        onClick = { langFilter = LangFilter.EN },
+                        label = { Text("Inglês") }
+                    )
+                    FilterChip(
+                        selected = langFilter == LangFilter.OTHER,
+                        onClick = { langFilter = LangFilter.OTHER },
+                        label = { Text("Outros") }
+                    )
                 }
             }
             if (loading) {
@@ -320,9 +399,9 @@ fun VoiceSearchCard() {
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            if (results.isNotEmpty()) {
+            if (visible.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
-                results.forEach { voice ->
+                visible.forEach { voice ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -350,7 +429,7 @@ fun VoiceSearchCard() {
                             Icon(
                                 Icons.Default.Check,
                                 null,
-                                tint =MaterialTheme.colorScheme.primary,
+                                tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
