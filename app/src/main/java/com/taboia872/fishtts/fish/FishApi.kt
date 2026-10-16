@@ -8,28 +8,6 @@ import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URLEncoder
 
-data class FishVoice(
-    val id: String,
-    val title: String,
-    val titleNormalized: String = ""
-) {
-    /** Case/diacritic-insensitive match key for client-side filtering. */
-    fun matches(q: String): Boolean {
-        val n = normalized()
-        val nq = normalize(q)
-        return n.contains(nq)
-    }
-
-    private fun normalized(): String =
-        if (titleNormalized.isNotBlank()) titleNormalized else normalize(title)
-
-    companion object {
-        fun normalize(s: String): String =
-            java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
-                .replace(Regex("\\p{Mn}+"), "")
-                .trim()
-    }
-}
 
 /**
  * FishAudio online TTS client (https://api.fish.audio/v1/tts).
@@ -42,6 +20,23 @@ data class FishVoice(
  * via title= param, pagination via page_number (has_more flag).
  */
 object FishApi {
+
+    data class FishVoice(
+        val id: String,
+        val title: String,
+        val titleNormalized: String = ""
+    ) {
+        /** Case/diacritic-insensitive match key for client-side filtering. */
+        fun matches(q: String): Boolean {
+            val n = if (titleNormalized.isNotBlank()) titleNormalized else normalize(title)
+            return n.contains(normalize(q))
+        }
+    }
+
+    fun normalize(s: String): String =
+        java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .trim()
 
     private const val TTS_ENDPOINT = "https://api.fish.audio/v1/tts"
     private const val VOICES_URL = "https://api.fish.audio/model"
@@ -57,10 +52,6 @@ object FishApi {
     data class FishModel(val id: String, val label: String, val free: Boolean)
 
     data class VoicePage(val voices: List<FishVoice>, val hasMore: Boolean)
-
-    /** Set to true by FishTtsService while a synthesis is running. */
-    @Volatile
-    var synthesizing: Boolean = false
 
     /**
      * List voices from FishAudio's public catalog, page by page.

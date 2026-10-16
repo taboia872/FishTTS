@@ -107,7 +107,6 @@ class FishTtsService : TextToSpeechService() {
     override fun onSynthesizeText(request: SynthesisRequest?, callback: SynthesisCallback?) {
         if (request == null || callback == null) return
         stopped = false
-        FishApi.synthesizing = true
         try {
             val cfg = AppSettings.config.value
             if (cfg.apiKey.isBlank()) {
@@ -162,8 +161,6 @@ class FishTtsService : TextToSpeechService() {
                 off += len
             }
             callback.done()
-        } finally {
-            FishApi.synthesizing = false
         }
     }
 

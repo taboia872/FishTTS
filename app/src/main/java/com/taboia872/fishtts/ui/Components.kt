@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import com.taboia872.fishtts.fish.FishApi
 import com.taboia872.fishtts.settings.AppSettings
 import com.taboia872.fishtts.settings.AppSettings.config
+import com.taboia872.fishtts.tts.LocalPlayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -52,7 +53,7 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun TestCard(
-    playerState: LocalPlayerState,
+    playerState: LocalPlayer.State,
     onSpeak: (String) -> Unit,
     onStop: () -> Unit
 ) {
@@ -94,12 +95,12 @@ fun TestCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 when (playerState) {
-                    is LocalPlayerState.Playing -> {
+                    is LocalPlayer.State.Playing -> {
                         IconButton(onClick = onStop) {
                             Icon(Icons.Default.Stop, "Parar")
                         }
                     }
-                    is LocalPlayerState.Synthesizing -> {
+                    is LocalPlayer.State.Synthesizing -> {
                         CircularProgressIndicator(
                             modifier = Modifier.size(24.dp),
                             strokeWidth = 2.dp
@@ -111,7 +112,7 @@ fun TestCard(
                 Button(
                     onClick = { onSpeak(text) },
                     enabled = text.isNotBlank() &&
-                        playerState !is LocalPlayerState.Synthesizing
+                        playerState !is LocalPlayer.State.Synthesizing
                 ) {
                     Icon(Icons.Default.PlayArrow, null)
                     Spacer(Modifier.size(6.dp))
@@ -420,6 +421,3 @@ fun ApiKeyCard() {
     }
 }
 
-
-/** LocalPlayer.State alias so UI files need fewer imports. */
-typealias LocalPlayerState = com.taboia872.fishtts.tts.LocalPlayer.State
